@@ -1,34 +1,44 @@
+import net from "net";
 import pg from "pg";
-import tunnel from "pg-tunnel";
-
 const { Pool } = pg;
 
 let pool;
 
 export async function initDB() {
   if (pool) return pool;
-
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("Falta DATABASE_URL");
 
-  // Creamos túnel IPv4 → IPv6
-  console.log("🚀 Iniciando túnel a Supabase...");
-  const proxy = await tunnel({
-    remoteHost: "db.kjgbttacpirkaydjjsp.supabase.co",
-    remotePort: 5432,
-    localPort: 55432 // puerto local arbitrario
+  // Host remoto IPv6 de Supabase
+  const remoteHost = "db.kjgbttacpirkaydjjsp.supabase.co";
+  const remotePort = 5432;
+  const localPort = 55432;
+
+  // Crear túnel TCP local
+  net.createServer((socket) => {
+    const client = net.createConnection({ host: remoteHost, port: remotePort, family: 6 }, () => {
+      socket.pipe(client);
+      client.pipe(socket);
+    });
+    client.on("error", (err) => {
+      console.error("Error en túnel (cliente):", err.message);
+    });
+    socket.on("error", (err) => {
+      console.error("Error en túnel (socket):", err.message);
+    });
+  }).listen(localPort, "127.0.0.1", () => {
+    console.log(`🌐 Túnel activo en puerto local ${localPort} hacia ${remoteHost}`);
   });
 
-  console.log("✅ Túnel creado correctamente en puerto local", proxy.localPort);
-
+  // Crear conexión a través del túnel
   pool = new Pool({
     connectionString,
     host: "127.0.0.1",
-    port: proxy.localPort,
-    ssl: { rejectUnauthorized: false }
+    port: localPort,
+    ssl: { rejectUnauthorized: false },
   });
 
-  console.log("✅ Base de datos conectada (proxy activo)");
+  console.log("✅ Pool de base de datos inicializado a través del túnel IPv6");
   return pool;
 }
 
