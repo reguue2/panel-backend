@@ -26,19 +26,7 @@ if (!WABA_PHONE_NUMBER_ID) console.warn("⚠️ Falta WABA_PHONE_NUMBER_ID");
 if (!WABA_ID) console.warn("⚠️ Falta WABA_ID (requerido para /api/templates)");
 
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
-app.use(
-  express.raw({ type: "application/json" }),
-  (req, res, next) => {
-    if (req.is("application/json") && typeof req.body === "string") {
-      try {
-        req.body = JSON.parse(req.body);
-      } catch (e) {
-        console.error("⚠️ Error parseando JSON:", e.message);
-      }
-    }
-    next();
-  }
-);
+app.use(express.json({ limit: "1mb" }));
 // ------------------- Autenticación mínima -------------------
 function requirePanelToken(req, res, next) {
   const t = req.header("x-api-key");
@@ -180,7 +168,7 @@ app.get("/webhook", (req, res) => {
 // Mensajes entrantes y status
 app.post("/webhook", async (req, res) => {
   try {
-    // Guardar copia del payload para depuración
+    console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
     try {
       await pool.query("CREATE TABLE IF NOT EXISTS webhook_events (id bigserial primary key, received_at timestamptz default now(), payload jsonb)");
       await pool.query("INSERT INTO webhook_events(payload) VALUES ($1)", [req.body]);
