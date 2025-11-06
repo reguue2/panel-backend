@@ -1,88 +1,70 @@
-import net from "net";
 import pg from "pg";
 const { Pool } = pg;
 
 let pool;
 
-export async function initDB() {
+export function initDB() {
   if (pool) return pool;
+
   const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error("Falta DATABASE_URL");
+  if (!connectionString) {
+    throw new Error("❌ Falta DATABASE_URL en variables de entorno");
+  }
 
-  // Host remoto IPv6 de Supabase
-  const remoteHost = "db.kjgbttacpirkaydjjsp.supabase.co";
-  const remotePort = 5432;
-  const localPort = 55432;
-
-  // Crear túnel TCP local
-  net.createServer((socket) => {
-    const client = net.createConnection({ host: remoteHost, port: remotePort, family: 6 }, () => {
-      socket.pipe(client);
-      client.pipe(socket);
-    });
-    client.on("error", (err) => {
-      console.error("Error en túnel (cliente):", err.message);
-    });
-    socket.on("error", (err) => {
-      console.error("Error en túnel (socket):", err.message);
-    });
-  }).listen(localPort, "127.0.0.1", () => {
-    console.log(`🌐 Túnel activo en puerto local ${localPort} hacia ${remoteHost}`);
-  });
-
-  // Crear conexión a través del túnel
   pool = new Pool({
     connectionString,
-    host: "127.0.0.1",
-    port: localPort,
-    ssl: { rejectUnauthorized: false },
+    ssl: {
+      rejectUnauthorized: false, // Render requiere SSL
+    },
   });
 
-  console.log("✅ Pool de base de datos inicializado a través del túnel IPv6");
+  console.log("✅ Base de datos conectada correctamente (Render PostgreSQL)");
   return pool;
 }
 
 export async function ensureSchema() {
-  const p = await initDB();
+  const p = initDB();
   await p.query(`
-    create table if not exists chats (
-      phone text primary key,
-      name text,
-      last_timestamp bigint default 0,
-      last_preview text
+    CREATE TABLE IF NOT EXISTS chats (
+      phone TEXT PRIMARY KEY,
+      name TEXT,
+      last_timestamp BIGINT DEFAULT 0,
+      last_preview TEXT
     );
 
-    create table if not exists messages (
-      id bigserial primary key,
-      phone text not null,
-      direction text check (direction in ('in','out')) not null,
-      type text default 'text',
-      text text,
-      template_name text,
-      timestamp bigint not null
+    CREATE TABLE IF NOT EXISTS messages (
+      id BIGSERIAL PRIMARY KEY,
+      phone TEXT NOT NULL,
+      direction TEXT CHECK (direction IN ('in','out')) NOT NULL,
+      type TEXT DEFAULT 'text',
+      text TEXT,
+      template_name TEXT,
+      timestamp BIGINT NOT NULL
     );
 
-    create index if not exists idx_messages_phone_time on messages(phone, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_messages_phone_time ON messages(phone, timestamp);
 
-    create table if not exists templates_cache (
-      id bigserial primary key,
-      name text not null,
-      language text,
-      status text,
-      category text,
-      last_synced_at timestamptz default now()
+    CREATE TABLE IF NOT EXISTS templates_cache (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      language TEXT,
+      status TEXT,
+      category TEXT,
+      last_synced_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  console.log("🛠️ Esquema verificado correctamente");
 }
 
 export async function upsertChat(client, { phone, preview, ts }) {
   await client.query(
     `
-    insert into chats(phone, name, last_timestamp, last_preview)
-    values($1, null, $2, $3)
-    on conflict (phone) do update set
-      last_timestamp = excluded.last_timestamp,
-      last_preview   = excluded.last_preview
+    INSERT INTO chats(phone, name, last_timestamp, last_preview)
+    VALUES($1, NULL, $2, $3)
+    ON CONFLICT (phone)
+    DO UPDATE SET
+      last_timestamp = EXCLUDED.last_timestamp,
+      last_preview   = EXCLUDED.last_preview
     `,
     [phone, ts, preview ?? null]
   );
@@ -91,8 +73,8 @@ export async function upsertChat(client, { phone, preview, ts }) {
 export async function insertMessage(client, { phone, direction, type, text, template_name, ts }) {
   await client.query(
     `
-    insert into messages(phone, direction, type, text, template_name, timestamp)
-    values($1,$2,$3,$4,$5,$6)
+    INSERT INTO messages(phone, direction, type, text, template_name, timestamp)
+    VALUES($1, $2, $3, $4, $5, $6)
     `,
     [phone, direction, type || "text", text ?? null, template_name ?? null, ts]
   );
