@@ -20,10 +20,10 @@ const WABA_ID = process.env.WABA_ID || ""; // necesario para /message_templates
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "verify_me";
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
-if (!PANEL_TOKEN) console.warn("Aviso: falta PANEL_TOKEN");
-if (!WHATSAPP_TOKEN) console.warn("Aviso: falta WHATSAPP_TOKEN");
-if (!WABA_PHONE_NUMBER_ID) console.warn("Aviso: falta WABA_PHONE_NUMBER_ID");
-if (!WABA_ID) console.warn("Aviso: falta WABA_ID (requerido para /api/templates)");
+if (!PANEL_TOKEN) console.warn("⚠️ Falta PANEL_TOKEN");
+if (!WHATSAPP_TOKEN) console.warn("⚠️ Falta WHATSAPP_TOKEN");
+if (!WABA_PHONE_NUMBER_ID) console.warn("⚠️ Falta WABA_PHONE_NUMBER_ID");
+if (!WABA_ID) console.warn("⚠️ Falta WABA_ID (requerido para /api/templates)");
 
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 app.use(express.json({ limit: "1mb" }));
@@ -38,7 +38,7 @@ function requirePanelToken(req, res, next) {
 
 const pool = initDB();
 ensureSchema().catch((e) => {
-  console.error("Error creando esquema", e);
+  console.error("❌ Error creando esquema", e);
   process.exit(1);
 });
 
@@ -47,16 +47,17 @@ function nowSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
-// RUTAS PROTEGIDAS
+// ------------------- RUTAS PROTEGIDAS -------------------
+
 app.get("/api/chats", requirePanelToken, async (req, res) => {
-  const { rows } = await pool.query("select * from chats order by last_timestamp desc");
+  const { rows } = await pool.query("SELECT * FROM chats ORDER BY last_timestamp DESC");
   res.json(rows);
 });
 
 app.get("/api/messages/:phone", requirePanelToken, async (req, res) => {
   const phone = req.params.phone;
   const { rows } = await pool.query(
-    "select * from messages where phone = $1 order by timestamp asc",
+    "SELECT * FROM messages WHERE phone = $1 ORDER BY timestamp ASC",
     [phone]
   );
   res.json(rows);
@@ -68,9 +69,27 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
     if (!to) return res.status(400).json({ error: "Campo 'to' requerido" });
 
     if (type === "template") {
-      if (!template?.name) return res.status(400).json({ error: "template.name requerido" });
+      if (!template?.name)
+        return res.status(400).json({ error: "template.name requerido" });
     } else {
       if (!text) return res.status(400).json({ error: "Campo 'text' requerido" });
+    }
+
+    // Buscar idioma correcto de la plantilla si no se especifica
+    if (type === "template" && !template.language) {
+      try {
+        const { rows } = await pool.query(
+          "SELECT language FROM templates_cache WHERE name = $1 LIMIT 1",
+          [template.name]
+        );
+        if (rows.length > 0) {
+          template.language = rows[0].language;
+        } else {
+          template.language = "es_ES";
+        }
+      } catch (e) {
+        template.language = "es_ES";
+      }
     }
 
     // Enviar a Meta
@@ -89,12 +108,12 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
         type: type === "template" ? "template" : "text",
         text: type === "template" ? null : text,
         template_name: type === "template" ? template.name : null,
-        ts
+        ts,
       });
       await upsertChat(client, {
         phone: to,
         preview: type === "template" ? `plantilla: ${template.name}` : text,
-        ts
+        ts,
       });
     } finally {
       client.release();
@@ -104,24 +123,22 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
     res.json({ ok: true, api: apiResp });
   } catch (e) {
     const details = e?.response?.data || e.message;
-    console.error("Fallo /api/messages/send", details);
+    console.error("❌ Fallo /api/messages/send", details);
     res.status(500).json({ error: "Fallo enviando mensaje", details });
   }
 });
 
-// Lista plantillas desde tu WABA, con cache sencilla
+// Lista plantillas desde tu WABA
 app.get("/api/templates", requirePanelToken, async (req, res) => {
   try {
-    // siempre refrescamos remoto; si quieres cache agresiva, ajusta
     const items = await listTemplates({ token: WHATSAPP_TOKEN, wabaId: WABA_ID });
 
-    // opcional: cachear
     const client = await pool.connect();
     try {
-      await client.query("delete from templates_cache");
+      await client.query("DELETE FROM templates_cache");
       for (const t of items) {
         await client.query(
-          "insert into templates_cache(name, language, status, category) values ($1,$2,$3,$4)",
+          "INSERT INTO templates_cache(name, language, status, category) VALUES ($1,$2,$3,$4)",
           [t.name, t.language, t.status, t.category]
         );
       }
@@ -132,12 +149,14 @@ app.get("/api/templates", requirePanelToken, async (req, res) => {
     res.json(items);
   } catch (e) {
     const details = e?.response?.data || e.message;
-    console.error("Fallo /api/templates", details);
+    console.error("❌ Fallo /api/templates", details);
     res.status(500).json({ error: "Fallo obteniendo plantillas", details });
   }
 });
 
-// WEBHOOK GET (verificacion)
+// ------------------- WEBHOOK -------------------
+
+// Verificación inicial del webhook
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -148,11 +167,11 @@ app.get("/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 
-// WEBHOOK POST (mensajes entrantes)
+// Mensajes entrantes y status
 app.post("/webhook", async (req, res) => {
   try {
     console.log("=== NUEVO WEBHOOK ===");
-    console.log(JSON.stringify(req.body, null, 2)); // log completo en Render
+    console.log(JSON.stringify(req.body, null, 2)); // Para ver estructura real
 
     const entries = req.body?.entry || [];
     for (const entry of entries) {
@@ -166,7 +185,7 @@ app.post("/webhook", async (req, res) => {
         if (messages.length > 0) {
           for (const msg of messages) {
             const from = msg.from;
-            const ts = parseInt(msg.timestamp, 10) || Math.floor(Date.now() / 1000);
+            const ts = parseInt(msg.timestamp, 10) || nowSeconds();
             const type = msg.type || "text";
 
             const text =
@@ -196,10 +215,17 @@ app.post("/webhook", async (req, res) => {
           }
         }
 
-        // 2️⃣ Actualizaciones de estado (entregados, leídos, etc.)
+        // 2️⃣ Actualizaciones de estado (entregado, leído, etc.)
         if (statuses.length > 0) {
           for (const st of statuses) {
-            console.log("Estado de mensaje:", st.status, "para", st.recipient_id);
+            console.log(
+              "Estado:",
+              st.status,
+              "para",
+              st.recipient_id,
+              "message_id:",
+              st.id
+            );
           }
         }
       }
@@ -207,14 +233,15 @@ app.post("/webhook", async (req, res) => {
 
     res.sendStatus(200);
   } catch (e) {
-    console.error("Error en webhook:", e);
+    console.error("❌ Error en webhook:", e);
     res.sendStatus(200);
   }
 });
 
-// socket
+// ------------------- SOCKET.IO -------------------
 io.on("connection", () => {});
 
+// ------------------- INICIO SERVIDOR -------------------
 server.listen(PORT, () => {
-  console.log(`Servidor en puerto ${PORT}`);
+  console.log(`✅ Servidor iniciado en puerto ${PORT}`);
 });
