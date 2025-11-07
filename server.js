@@ -11,6 +11,8 @@ import {
   insertMessage,
 } from "./database.js";
 import { sendWhatsAppMessage, listTemplates } from "./meta.js";
+import fs from "fs";
+import path from "path";
 
 dotenv.config();
 
@@ -208,6 +210,36 @@ app.post("/webhook", async (req, res) => {
   }
 
   res.sendStatus(200);
+});
+
+const TEMP_DIR = "/tmp/audios";
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+
+app.get("/api/media/:id", async (req, res) => {
+  const mediaId = req.params.id;
+  if (!mediaId) return res.status(400).send("Falta ID");
+
+  try {
+    // Obtener URL de descarga directa
+    const metaResp = await axios.get(`https://graph.facebook.com/v20.0/${mediaId}`, {
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+    });
+
+    const fileUrl = metaResp.data.url;
+    if (!fileUrl) return res.status(404).send("URL no encontrada");
+
+    // Descargar el binario del audio
+    const audioResp = await axios.get(fileUrl, {
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+      responseType: "arraybuffer",
+    });
+
+    res.set("Content-Type", "audio/ogg");
+    res.send(audioResp.data);
+  } catch (err) {
+    console.error("❌ Error al servir audio:", err.message);
+    res.status(500).send("Error descargando el audio");
+  }
 });
 
 // ------------------- SOCKET.IO -------------------
