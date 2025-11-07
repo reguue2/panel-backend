@@ -59,9 +59,9 @@ app.get("/api/chats", async (req, res) => {
   const client = await pool.connect();
   try {
     const r = await client.query(`
-      SELECT phone, timestamp, last_preview
+      SELECT phone, last_timestamp AS timestamp, last_preview
       FROM chats
-      ORDER BY timestamp DESC
+      ORDER BY last_timestamp DESC
       LIMIT 500
     `);
     res.json(r.rows);
@@ -72,6 +72,7 @@ app.get("/api/chats", async (req, res) => {
     client.release();
   }
 });
+
 
 app.get("/api/messages/:phone", async (req, res) => {
   const phone = req.params.phone;
