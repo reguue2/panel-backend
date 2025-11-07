@@ -155,8 +155,11 @@ app.post("/webhook", async (req, res) => {
     const changes = entry?.changes || [];
     for (const change of changes) {
       const value = change?.value || {};
+      const phoneNumberId = value?.metadata?.phone_number_id;
+      if (phoneNumberId && phoneNumberId !== WABA_PHONE_NUMBER_ID) {
+        continue;
+      }
       const messages = value?.messages || [];
-
       for (const msg of messages) {
         const from = msg.from;
         const ts = parseInt(msg.timestamp, 10) || nowSeconds();
