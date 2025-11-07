@@ -4,6 +4,8 @@ import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
 import axios from "axios";
+import fs from "fs";
+import path from "path";
 import {
   initDB,
   ensureSchema,
@@ -11,8 +13,6 @@ import {
   insertMessage,
 } from "./database.js";
 import { sendWhatsAppMessage, listTemplates } from "./meta.js";
-import fs from "fs";
-import path from "path";
 
 dotenv.config();
 
@@ -20,157 +20,103 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-const PORT = process.env.PORT || 10000;
+app.use(express.json({ limit: "10mb" }));
+
+// ---------- ENV ----------
+const PORT = process.env.PORT || 3001;
 const PANEL_TOKEN = process.env.PANEL_TOKEN || "";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
 const WABA_PHONE_NUMBER_ID = process.env.WABA_PHONE_NUMBER_ID || "";
 const WABA_ID = process.env.WABA_ID || "";
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "verify_me";
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const GRAPH = "https://graph.facebook.com";
+const API_VER = process.env.GRAPH_VERSION || "v24.0";
 
-if (!PANEL_TOKEN) console.warn("⚠️ Falta PANEL_TOKEN");
-if (!WHATSAPP_TOKEN) console.warn("⚠️ Falta WHATSAPP_TOKEN");
-if (!WABA_PHONE_NUMBER_ID) console.warn("⚠️ Falta WABA_PHONE_NUMBER_ID");
-if (!WABA_ID) console.warn("⚠️ Falta WABA_ID");
+if (!PANEL_TOKEN) console.warn("Falta PANEL_TOKEN");
+if (!WHATSAPP_TOKEN) console.warn("Falta WHATSAPP_TOKEN");
+if (!WABA_PHONE_NUMBER_ID) console.warn("Falta WABA_PHONE_NUMBER_ID");
+if (!WABA_ID) console.warn("Falta WABA_ID");
 
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 
-app.use(express.json({ limit: "1mb" }));
-
-function requirePanelToken(req, res, next) {
-  const t = req.header("x-api-key");
-  if (!PANEL_TOKEN)
-    return res.status(500).json({ error: "PANEL_TOKEN no configurado" });
-  if (t !== PANEL_TOKEN)
-    return res.status(401).json({ error: "No autorizado" });
-  return next();
-}
-
+// ---------- DB ----------
 const pool = initDB();
-ensureSchema().catch((e) => {
-  console.error("❌ Error creando esquema", e);
-  process.exit(1);
+await ensureSchema(pool);
+
+// ---------- Auth muy simple por header ----------
+app.use((req, res, next) => {
+  // permitir verificacion de webhook sin header
+  if (req.path.startsWith("/webhook")) return next();
+
+  const key = req.headers["x-api-key"];
+  if (!key || key !== PANEL_TOKEN) return res.status(401).json({ error: "no auth" });
+  next();
 });
 
-function nowSeconds() {
-  return Math.floor(Date.now() / 1000);
-}
-
-// ------------------- RUTAS -------------------
-
-app.get("/api/chats", requirePanelToken, async (req, res) => {
-  const { rows } = await pool.query(
-    "SELECT * FROM chats ORDER BY last_timestamp DESC"
-  );
-  res.json(rows);
-});
-
-app.get("/api/messages/:phone", requirePanelToken, async (req, res) => {
-  const phone = req.params.phone;
-  const { rows } = await pool.query(
-    "SELECT * FROM messages WHERE phone = $1 ORDER BY timestamp ASC",
-    [phone]
-  );
-  res.json(rows);
-});
-
-app.post("/api/messages/send", requirePanelToken, async (req, res) => {
+// ---------- APIs panel ----------
+app.get("/api/chats", async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { to, type = "text", text, template } = req.body;
-    if (!to) return res.status(400).json({ error: "Campo 'to' requerido" });
+    const r = await client.query(
+      `SELECT phone, last_ts as timestamp, last_preview
+       FROM chats
+       ORDER BY last_ts DESC
+       LIMIT 500`
+    );
+    res.json(r.rows);
+  } finally {
+    client.release();
+  }
+});
 
-    if (type === "template") {
-      if (!template?.name)
-        return res.status(400).json({ error: "template.name requerido" });
-      const tplName = String(template.name).trim().toLowerCase();
+app.get("/api/messages/:phone", async (req, res) => {
+  const phone = req.params.phone;
+  const client = await pool.connect();
+  try {
+    const r = await client.query(
+      `SELECT id, phone, direction, type, text, template_name, media_url, timestamp
+       FROM messages
+       WHERE phone = $1
+       ORDER BY timestamp ASC`,
+      [phone]
+    );
+    res.json(r.rows);
+  } finally {
+    client.release();
+  }
+});
 
-      let lang = null;
-      try {
-        const { rows } = await pool.query(
-          "SELECT language FROM templates_cache WHERE name = $1 LIMIT 1",
-          [tplName]
-        );
-        if (rows.length > 0) lang = rows[0].language;
-      } catch {}
-
-      template.name = tplName;
-      template.language = lang || String(template.language || "es_ES");
-    } else {
-      if (!text) return res.status(400).json({ error: "Campo 'text' requerido" });
-    }
-
-    const apiResp = await sendWhatsAppMessage(
+app.post("/api/messages/send", async (req, res) => {
+  const { to, type, text, template } = req.body || {};
+  try {
+    const r = await sendWhatsAppMessage(
       { to, type, text, template },
       { token: WHATSAPP_TOKEN, phoneNumberId: WABA_PHONE_NUMBER_ID }
     );
-
-    const client = await pool.connect();
-    try {
-      const ts = nowSeconds();
-      await insertMessage(client, {
-        phone: to,
-        direction: "out",
-        type,
-        text,
-        media_url: null,
-        template_name: type === "template" ? template.name : null,
-        ts,
-      });
-      await upsertChat(client, {
-        phone: to,
-        preview: type === "template" ? `Plantilla: ${template.name}` : text,
-        ts,
-      });
-    } finally {
-      client.release();
-    }
-
-    io.emit("message:new", { phone: to });
-    res.json({ ok: true, api: apiResp });
-  } catch (e) {
-    const details = e?.response?.data || e.message;
-    console.error("❌ Fallo /api/messages/send", details);
-    res.status(500).json({ error: "Fallo enviando mensaje", details });
+    res.json({ ok: true, result: r.data });
+  } catch (err) {
+    console.error("Error enviando mensaje:", err.response?.data || err.message);
+    res.status(500).json({ error: "no enviado" });
   }
 });
 
-app.get("/api/templates", requirePanelToken, async (req, res) => {
+app.get("/api/templates", async (req, res) => {
   try {
-    // 1) Pedimos a Meta todas las plantillas del WABA correcto
-    const items = await listTemplates({
-      token: WHATSAPP_TOKEN,
-      wabaId: WABA_ID,
-    });
-
-    // 2) Actualizamos la cache en BD (opcional pero conveniente)
-    const client = await pool.connect();
-    try {
-      await client.query("DELETE FROM templates_cache");
-      for (const t of items) {
-        await client.query(
-          "INSERT INTO templates_cache(name, language, status, category) VALUES ($1,$2,$3,$4)",
-          [t.name, t.language, t.status, t.category]
-        );
-      }
-    } finally {
-      client.release();
-    }
-
-    // 3) Respondemos al frontend
-    res.json(items);
+    const list = await listTemplates({ token: WHATSAPP_TOKEN, wabaId: WABA_ID });
+    res.json(list);
   } catch (e) {
-    const details = e?.response?.data || e.message;
-    console.error("❌ Fallo /api/templates", details);
-    res.status(500).json({ error: "Fallo obteniendo plantillas", details });
+    console.error(e.message);
+    res.status(500).json({ error: "no templates" });
   }
 });
 
-// ------------------- AUDIO + WEBHOOK -------------------
-
+// ---------- Webhook WhatsApp ----------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
+
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
     return res.status(200).send(challenge);
   }
@@ -178,110 +124,128 @@ app.get("/webhook", (req, res) => {
 });
 
 app.post("/webhook", async (req, res) => {
-  console.log("📩 Webhook recibido =========================");
-  console.log(JSON.stringify(req.body, null, 2));
+  const body = req.body;
 
-  const entries = req.body?.entry || [];
-  for (const entry of entries) {
-    const changes = entry?.changes || [];
-    for (const change of changes) {
-      const value = change?.value || {};
-      const phoneNumberId = value?.metadata?.phone_number_id;
-      if (phoneNumberId && phoneNumberId !== WABA_PHONE_NUMBER_ID) {
-        continue;
-      }
-      const messages = value?.messages || [];
-      for (const msg of messages) {
-        const from = msg.from;
-        const ts = parseInt(msg.timestamp, 10) || nowSeconds();
-        const type = msg.type || "text";
+  try {
+    const entry = body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+    const messages = value?.messages || [];
 
-        let text = "";
+    if (!messages.length) {
+      return res.sendStatus(200);
+    }
+
+    const client = await pool.connect();
+    try {
+      for (const m of messages) {
+        const from = m.from; // telefono
+        const ts = Number(m.timestamp || Math.floor(Date.now() / 1000));
+        const type = m.type;
+
+        // Upsert chat preview
+        let preview = "";
+        let direction = "in";
+        let saveType = "text";
+        let text = null;
+        let template_name = null;
         let media_url = null;
 
         if (type === "text") {
-          text = msg.text?.body || "";
-        } else if (type === "audio" && msg.audio?.id) {
-          // Recuperar URL del audio con el token
-          try {
-            const mediaId = msg.audio.id;
-            const mediaResp = await axios.get(
-              `https://graph.facebook.com/v20.0/${mediaId}`,
-              {
-                headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-              }
-            );
-            media_url = `/api/media/${msg.audio.id}`;
-          } catch (err) {
-            console.error("⚠️ Error obteniendo URL del audio:", err.message);
-          }
+          text = m.text?.body || "";
+          preview = text.slice(0, 60);
+          saveType = "text";
+        } else if (type === "audio" || type === "voice") {
+          // WhatsApp envia m.audio.id y mime_type
+          const mediaId = m.audio?.id;
+          preview = "[AUDIO]";
+          saveType = "audio";
+          // apuntamos al proxy estable del backend
+          media_url = `/api/media/${mediaId}`;
+        } else if (type === "image") {
+          const mediaId = m.image?.id;
+          preview = "[IMAGEN]";
+          saveType = "image";
+          media_url = `/api/media/${mediaId}`;
+        } else if (type === "document") {
+          const mediaId = m.document?.id;
+          preview = m.document?.filename || "[DOCUMENTO]";
+          saveType = "document";
+          media_url = `/api/media/${mediaId}`;
+        } else if (type === "button" || type === "interactive") {
+          preview = "[INTERACTIVO]";
+          saveType = "text";
+        } else {
+          preview = `[${type.toUpperCase()}]`;
+          saveType = "text";
         }
 
-        const client = await pool.connect();
-        try {
-          await insertMessage(client, {
-            phone: from,
-            direction: "in",
-            type,
-            text,
-            media_url,
-            template_name: null,
-            ts,
-          });
-          await upsertChat(client, {
-            phone: from,
-            preview: text || "[Audio recibido]",
-            ts,
-          });
-        } finally {
-          client.release();
-        }
-
-        io.emit("message:new", { phone: from });
-        console.log(`✅ Mensaje recibido de ${from}: ${text || "[AUDIO]"}`);
+        await upsertChat(client, { phone: from, ts, preview });
+        await insertMessage(client, {
+          phone: from,
+          direction,
+          type: saveType,
+          text,
+          template_name,
+          media_url,
+          ts,
+        });
       }
+    } finally {
+      client.release();
     }
+  } catch (e) {
+    console.error("Error parseando webhook:", e.message, e.stack);
   }
 
   res.sendStatus(200);
 });
 
-const TEMP_DIR = "/tmp/audios";
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
-
+// ---------- Proxy de media (audios, etc.) ----------
 app.get("/api/media/:id", async (req, res) => {
   const mediaId = req.params.id;
   if (!mediaId) return res.status(400).send("Falta ID");
 
   try {
-    // Obtener URL de descarga directa
-    const metaResp = await axios.get(`https://graph.facebook.com/v20.0/${mediaId}`, {
+    // 1) Pedimos metadatos (url y mime_type)
+    const meta = await axios.get(`${GRAPH}/${API_VER}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+      params: { fields: "url,mime_type,sha256,file_size" },
+    });
+
+    const url = meta.data?.url;
+    const mime = meta.data?.mime_type || "application/octet-stream";
+    if (!url) return res.status(404).send("No url");
+
+    // 2) Descargamos y hacemos stream al navegador
+    const r = await axios.get(url, {
+      responseType: "stream",
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
     });
 
-    const fileUrl = metaResp.data.url;
-    if (!fileUrl) return res.status(404).send("URL no encontrada");
+    // Pasamos cabeceras utiles para el <audio>
+    if (r.headers["content-length"]) {
+      res.setHeader("Content-Length", r.headers["content-length"]);
+    }
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Cache-Control", "private, max-age=31536000"); // cachear si quieres
 
-    // Descargar el binario del audio
-    const audioResp = await axios.get(fileUrl, {
-      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-      responseType: "arraybuffer",
+    r.data.pipe(res);
+    r.data.on("error", (err) => {
+      console.error("Error piping media:", err.message);
+      if (!res.headersSent) res.status(500).end("media error");
+      else res.end();
     });
-
-    res.set("Content-Type", "audio/ogg");
-    res.send(audioResp.data);
   } catch (err) {
-    console.error("❌ Error al servir audio:", err.message);
-    res.status(500).send("Error descargando el audio");
+    console.error("Error al servir media:", err.response?.data || err.message);
+    res.status(500).send("error media");
   }
 });
 
-// ------------------- SOCKET.IO -------------------
-
+// ---------- Socket.IO (opcional) ----------
 io.on("connection", () => {});
 
-// ------------------- INICIO -------------------
-
+// ---------- Inicio ----------
 server.listen(PORT, () => {
-  console.log(`✅ Servidor iniciado en puerto ${PORT}`);
+  console.log(`Servidor en puerto ${PORT}`);
 });
