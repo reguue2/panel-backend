@@ -168,8 +168,6 @@ app.post("/webhook", async (req, res) => {
           saveType = "audio";
           media_url = mediaId ? `/api/media/${mediaId}` : null;
           console.log("Audio detectado:", mediaId);
-        }
-
         } else if (type === "image") {
           const mediaId = m.image?.id;
           preview = "[IMAGEN]";
