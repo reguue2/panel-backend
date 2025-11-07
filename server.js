@@ -108,17 +108,17 @@ app.post("/api/messages/send", requirePanelToken, async (req, res) => {
     try {
       const ts = nowSeconds();
       await insertMessage(client, {
-        phone: from,
-        direction: "in",
+        phone: to,
+        direction: "out",
         type,
         text,
-        media_url,
-        template_name: null,
+        media_url: null,
+        template_name: type === "template" ? template.name : null,
         ts,
       });
       await upsertChat(client, {
         phone: to,
-        preview: type === "template" ? `plantilla: ${template.name}` : text,
+        preview: type === "template" ? `Plantilla: ${template.name}` : text,
         ts,
       });
     } finally {
