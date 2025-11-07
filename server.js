@@ -219,3 +219,14 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`✅ Servidor iniciado en puerto ${PORT}`);
 });
+
+// ⚠️ Ruta temporal para ejecutar ALTER TABLE
+app.get("/api/debug/add-media-url", requirePanelToken, async (req, res) => {
+  try {
+    await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url text;`);
+    res.json({ ok: true, message: "Columna media_url añadida (si no existía)" });
+  } catch (err) {
+    console.error("Error ALTER TABLE:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
