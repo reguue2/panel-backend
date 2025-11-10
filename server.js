@@ -293,3 +293,25 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
+
+// RUTA TEMPORAL PARA ALTER TABLE (usar solo una vez)
+app.post("/api/admin/add-is-read-column", async (req, res) => {
+  const API_KEY = process.env.PANEL_TOKEN || "";
+  const providedKey = req.headers["x-api-key"];
+
+  if (!providedKey || providedKey !== API_KEY) {
+    return res.status(403).json({ error: "no auth" });
+  }
+
+  try {
+    const client = await pool.connect();
+    await client.query(
+      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;"
+    );
+    client.release();
+    res.json({ success: true, message: "Columna is_read añadida correctamente" });
+  } catch (err) {
+    console.error("Error al añadir columna is_read:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
