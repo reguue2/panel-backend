@@ -170,23 +170,25 @@ app.post("/api/messages/send", async (req, res) => {
 app.get("/api/templates", async (req, res) => {
   const p = initDB();
   try {
-    // Llamar directamente a Meta y refrescar siempre
     console.log("Sincronizando plantillas desde Meta...");
-    const url = `${GRAPH}/${API_VER}/${WABA_PHONE_NUMBER_ID}/message_templates`;
+
+    const WABA_ID = process.env.WABA_ID;
+    if (!WABA_ID) {
+      return res
+        .status(500)
+        .json({ error: "Falta WABA_ID en las variables de entorno" });
+    }
+
+    // ✅ endpoint correcto: business_id/message_templates
+    const url = `${GRAPH}/${API_VER}/${WABA_ID}/message_templates`;
 
     const resp = await axios.get(url, {
       headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
     });
 
-    // Validar respuesta
-    if (!resp.data || !Array.isArray(resp.data.data)) {
-      console.error("Respuesta inesperada de Meta:", resp.data);
-      return res.status(500).json({ error: "Respuesta inesperada de Meta" });
-    }
+    const templates = resp.data?.data || [];
 
-    const templates = resp.data.data;
-
-    // Vaciar y actualizar cache local
+    // Vaciar cache anterior y guardar nuevas
     await p.query(`DELETE FROM templates_cache;`);
     for (const t of templates) {
       await p.query(
@@ -201,13 +203,11 @@ app.get("/api/templates", async (req, res) => {
   } catch (err) {
     console.error("Error al sincronizar plantillas:", err.response?.data || err.message);
     res.status(500).json({
-      error: "No se pudieron cargar las plantillas desde Meta. Revisa el token o el ID.",
+      error: "No se pudieron cargar las plantillas desde Meta",
       details: err.response?.data || err.message,
     });
   }
 });
-
-
 // ---------- API: MEDIA PROXY ----------
 app.get("/api/media/:id", async (req, res) => {
   const mediaId = req.params.id;
