@@ -308,3 +308,21 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
+// Solo para depurar direction y ver si se marcan como leídos
+app.get("/api/debug/directions/:phone", async (req, res) => {
+  const { phone } = req.params;
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      "SELECT id, direction, is_read FROM messages WHERE phone = $1 ORDER BY id DESC LIMIT 20",
+      [phone]
+    );
+    client.release();
+    console.log("DEBUG direction/is_read para", phone, result.rows);
+    res.json(result.rows);
+  } catch (err) {
+    client.release();
+    console.error("Error debug directions:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
