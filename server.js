@@ -337,3 +337,17 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
+app.get("/api/admin/debug-last", async (req, res) => {
+  const { phone } = req.query;
+  if (!phone) return res.status(400).json({ error: "phone requerido" });
+  const p = initDB();
+  const { rows } = await p.query(
+    `SELECT id, phone, direction, type, text, media_url, timestamp
+     FROM messages
+     WHERE phone = $1
+     ORDER BY id DESC
+     LIMIT 10`,
+    [phone]
+  );
+  res.json(rows);
+});
