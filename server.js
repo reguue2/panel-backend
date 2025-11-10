@@ -284,22 +284,21 @@ app.patch("/api/chats/:phone/read", async (req, res) => {
       SET is_read = TRUE
       WHERE phone = $1
         AND direction = 'in'
-        AND is_read = FALSE
+        AND (is_read = FALSE OR is_read IS NULL)
       `,
       [phone]
     );
 
-    console.log(`Mensajes marcados como leídos para ${phone}:`, update.rowCount);
+    console.log(`Mensajes marcados como leídos para ${phone}: ${update.rowCount}`);
 
-    client.release();
-    return res.json({ success: true, updated: update.rowCount });
+    res.json({ success: true, updated: update.rowCount });
   } catch (err) {
-    client.release();
     console.error("Error al marcar como leídos:", err);
-    return res.status(500).json({ error: "Error interno al marcar como leídos" });
+    res.status(500).json({ error: "Error interno al marcar como leídos" });
+  } finally {
+    client.release();
   }
 });
-
 
 // ---------- Socket.IO ----------
 io.on("connection", () => {});
@@ -307,22 +306,4 @@ io.on("connection", () => {});
 // ---------- Inicio ----------
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
-});
-// Solo para depurar direction y ver si se marcan como leídos
-app.get("/api/debug/directions/:phone", async (req, res) => {
-  const { phone } = req.params;
-  const client = await pool.connect();
-  try {
-    const result = await client.query(
-      "SELECT id, direction, is_read FROM messages WHERE phone = $1 ORDER BY id DESC LIMIT 20",
-      [phone]
-    );
-    client.release();
-    console.log("DEBUG direction/is_read para", phone, result.rows);
-    res.json(result.rows);
-  } catch (err) {
-    client.release();
-    console.error("Error debug directions:", err);
-    res.status(500).json({ error: "Error interno" });
-  }
 });
