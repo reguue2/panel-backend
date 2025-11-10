@@ -282,6 +282,7 @@ app.post("/webhook", async (req, res) => {
               media_url: null,
               is_read: false,
             });
+            io.emit("message:new", { phone: from });
           }
           // --- IMAGEN ---
           else if (type === "image" && m.image?.id) {
@@ -295,6 +296,7 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.image.id}`,
               is_read: false,
             });
+            io.emit("message:new", { phone: from });
           }
           // --- DOCUMENTO ---
           else if (type === "document" && m.document?.id) {
@@ -308,6 +310,7 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.document.id}`,
               is_read: false,
             });
+            io.emit("message:new", { phone: from });
           }
           // --- VIDEO ---
           else if (type === "video" && m.video?.id) {
@@ -321,6 +324,7 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.video.id}`,
               is_read: false,
             });
+            io.emit("message:new", { phone: from });
           }
           // --- AUDIO ---
           else if (type === "audio" && m.audio?.id) {
@@ -334,6 +338,7 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.audio.id}`,
               is_read: false,
             });
+            io.emit("message:new", { phone: from });
           }
           // --- BOTONES / LISTAS (RESPUESTAS INTERACTIVAS) ---
           else if (
@@ -367,9 +372,8 @@ app.post("/webhook", async (req, res) => {
               media_url: null,
               is_read: false,
             });
+            io.emit("message:new", { phone: from });
           }
-
-          io.emit("message:new", { phone: from });
         }
       }
     }
