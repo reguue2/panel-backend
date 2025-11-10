@@ -80,6 +80,23 @@ export async function insertMessage(msg) {
   const p = initDB();
   const client = await p.connect();
   try {
+    // --- Evitar duplicados (Meta reenvía el mismo mensaje varias veces) ---
+    const exists = await client.query(
+      `SELECT id FROM messages
+       WHERE phone = $1
+         AND direction = $2
+         AND timestamp = $3
+         AND COALESCE(text, '') = COALESCE($4, '')
+       LIMIT 1`,
+      [msg.phone, msg.direction, msg.timestamp, msg.text ?? '']
+    );
+
+    if (exists.rows.length > 0) {
+      console.log("Mensaje duplicado ignorado:", msg);
+      return;
+    }
+
+    // --- Insertar mensaje ---
     await client.query(
       `
       INSERT INTO messages (phone, direction, type, text, template_name, timestamp, media_url, is_read)
@@ -87,20 +104,22 @@ export async function insertMessage(msg) {
       `,
       [
         msg.phone,
-        msg.direction,                    // 'in' | 'out'
-        msg.type || 'text',               // 'text' | 'template' | 'image' | 'document' | 'video'...
+        msg.direction,
+        msg.type || "text",
         msg.text ?? null,
         msg.template_name ?? null,
-        msg.timestamp,                    // en segundos
+        msg.timestamp,
         msg.media_url ?? null,
-        msg.is_read ?? false
+        msg.is_read ?? false,
       ]
     );
 
-    // mantener chats
+    // --- Actualizar tabla de chats ---
     const preview =
       msg.text ??
-      (msg.template_name ? `Plantilla: ${msg.template_name}` : (msg.type || 'media'));
+      (msg.template_name
+        ? `Plantilla: ${msg.template_name}`
+        : msg.type || "media");
     await upsertChat(client, {
       phone: msg.phone,
       preview,
