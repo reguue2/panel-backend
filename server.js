@@ -266,6 +266,23 @@ app.get("/api/media/:id", async (req, res) => {
   }
 });
 
+app.patch("/api/chats/:phone/read", async (req, res) => {
+  const { phone } = req.params;
+  try {
+    const client = await pool.connect();
+    await client.query(
+      "UPDATE messages SET is_read = TRUE WHERE chat_phone = $1 AND sender != 'me'",
+      [phone]
+    );
+    client.release();
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error marcando mensajes como leídos:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+
 // ---------- Socket.IO ----------
 io.on("connection", () => {});
 
