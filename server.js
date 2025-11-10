@@ -104,7 +104,7 @@ async function sendWhatsAppText({ to, text }) {
 }
 
 async function sendWhatsAppTemplate({ to, name, language = "es", components = [] }) {
-  const lang = String(language).includes("_") ? language : `${language}_ES`;
+  const lang = "es";
   const url = `${GRAPH}/${API_VER}/${WABA_PHONE_NUMBER_ID}/messages`;
   await axios.post(
     url,
