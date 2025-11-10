@@ -169,60 +169,44 @@ app.post("/api/messages/send", async (req, res) => {
 // ---------- API: TEMPLATES (cache sencillo) ----------
 app.get("/api/templates", async (req, res) => {
   const p = initDB();
-
   try {
-    // comprobar si la cache está vacía o desactualizada
-    const { rows: cacheRows } = await p.query(`
-      SELECT *, EXTRACT(EPOCH FROM (NOW() - last_synced_at)) AS seconds_old
-      FROM templates_cache
-      ORDER BY name ASC
-    `);
+    // Llamar directamente a Meta y refrescar siempre
+    console.log("Sincronizando plantillas desde Meta...");
+    const url = `${GRAPH}/${API_VER}/${WABA_PHONE_NUMBER_ID}/message_templates`;
 
-    const needsRefresh =
-      cacheRows.length === 0 ||
-      (cacheRows[0].seconds_old && cacheRows[0].seconds_old > 600); // 10 min
+    const resp = await axios.get(url, {
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+    });
 
-    if (needsRefresh) {
-      console.log("Sincronizando plantillas desde Meta...");
-
-      // pedir plantillas actuales a Meta
-      const resp = await axios.get(
-        `${GRAPH}/${API_VER}/${WABA_PHONE_NUMBER_ID}/message_templates`,
-        {
-          headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
-        }
-      );
-
-      const templates = resp.data?.data || [];
-
-      // vaciar cache anterior y guardar nuevas
-      await p.query(`DELETE FROM templates_cache;`);
-      for (const t of templates) {
-        await p.query(
-          `INSERT INTO templates_cache (name, language, status, category, last_synced_at)
-           VALUES ($1,$2,$3,$4,NOW())`,
-          [t.name, t.language || null, t.status || null, t.category || null]
-        );
-      }
-
-      console.log(`Plantillas actualizadas (${templates.length} total).`);
-
-      return res.json(templates);
-    } else {
-      // devolver cache actual
-      const formatted = cacheRows.map((r) => ({
-        name: r.name,
-        language: r.language,
-        status: r.status,
-        category: r.category,
-      }));
-      return res.json(formatted);
+    // Validar respuesta
+    if (!resp.data || !Array.isArray(resp.data.data)) {
+      console.error("Respuesta inesperada de Meta:", resp.data);
+      return res.status(500).json({ error: "Respuesta inesperada de Meta" });
     }
+
+    const templates = resp.data.data;
+
+    // Vaciar y actualizar cache local
+    await p.query(`DELETE FROM templates_cache;`);
+    for (const t of templates) {
+      await p.query(
+        `INSERT INTO templates_cache (name, language, status, category, last_synced_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [t.name, t.language || null, t.status || null, t.category || null]
+      );
+    }
+
+    console.log(`Plantillas actualizadas (${templates.length} total).`);
+    res.json(templates);
   } catch (err) {
-    console.error("Error al sincronizar plantillas:", err.message);
-    return res.status(500).json({ error: "Error al sincronizar plantillas" });
+    console.error("Error al sincronizar plantillas:", err.response?.data || err.message);
+    res.status(500).json({
+      error: "No se pudieron cargar las plantillas desde Meta. Revisa el token o el ID.",
+      details: err.response?.data || err.message,
+    });
   }
 });
+
 
 // ---------- API: MEDIA PROXY ----------
 app.get("/api/media/:id", async (req, res) => {
