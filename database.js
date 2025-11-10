@@ -73,10 +73,19 @@ export async function upsertChat(client, { phone, preview, ts }) {
 export async function insertMessage(msg) {
   const client = await pool.connect();
   try {
-    await client.query(
-      `INSERT INTO messages (chat_phone, sender, text, timestamp, is_read)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [msg.chat_phone, msg.sender, msg.text, msg.timestamp, msg.is_read ?? false]
+     await client.query(
+      `INSERT INTO messages (phone, direction, type, text, template_name, timestamp, media_url, is_read)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        msg.phone,
+        msg.direction,
+        msg.type || "text",
+        msg.text || null,
+        msg.template_name || null,
+        msg.timestamp,
+        msg.media_url || null,
+        msg.is_read ?? false,
+      ]
     );
   } finally {
     client.release();
