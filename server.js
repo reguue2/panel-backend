@@ -291,3 +291,26 @@ io.on("connection", () => {});
 server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
+
+app.post("/api/admin/fix-schema", async (req, res) => {
+  try {
+    const p = initDB();
+    await p.query(`
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+      ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
+      CREATE INDEX IF NOT EXISTS idx_messages_phone_time ON messages(phone, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(phone, is_read) WHERE is_read = false;
+
+      CREATE TABLE IF NOT EXISTS webhook_events (
+        id BIGSERIAL PRIMARY KEY,
+        received_at TIMESTAMPTZ DEFAULT NOW(),
+        payload JSONB
+      );
+    `);
+    res.json({ ok: true, message: "Esquema actualizado correctamente" });
+  } catch (err) {
+    console.error("Error fix-schema:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
