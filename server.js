@@ -54,22 +54,25 @@ app.use((req, res, next) => {
 
 // ---------- APIs panel ----------
 app.get("/api/chats", async (req, res) => {
-  const client = await pool.connect();
   try {
-    const r = await client.query(`
-      SELECT phone, last_timestamp AS timestamp, last_preview
-      FROM chats
-      ORDER BY last_timestamp DESC
-      LIMIT 500
+    const client = await pool.connect();
+    const result = await client.query(`
+      SELECT c.*, 
+        EXISTS (
+          SELECT 1 FROM messages m 
+          WHERE m.chat_phone = c.phone AND m.is_read = FALSE AND m.sender != 'me'
+        ) AS has_unread
+      FROM chats c
+      ORDER BY c.last_timestamp DESC
     `);
-    res.json(r.rows);
-  } catch (err) {
-    console.error("Error en /api/chats:", err.message);
-    res.status(500).json({ error: "DB error" });
-  } finally {
     client.release();
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error obteniendo chats:", err);
+    res.status(500).json({ error: "Error interno" });
   }
 });
+
 
 app.get("/api/messages/:phone", async (req, res) => {
   const phone = req.params.phone;
