@@ -169,10 +169,59 @@ app.post("/api/messages/send", async (req, res) => {
 // ---------- API: TEMPLATES (cache sencillo) ----------
 app.get("/api/templates", async (req, res) => {
   const p = initDB();
-  const { rows } = await p.query(
-    `SELECT name, language, status, category FROM templates_cache ORDER BY name ASC`
-  );
-  res.json(rows);
+
+  try {
+    // comprobar si la cache está vacía o desactualizada
+    const { rows: cacheRows } = await p.query(`
+      SELECT *, EXTRACT(EPOCH FROM (NOW() - last_synced_at)) AS seconds_old
+      FROM templates_cache
+      ORDER BY name ASC
+    `);
+
+    const needsRefresh =
+      cacheRows.length === 0 ||
+      (cacheRows[0].seconds_old && cacheRows[0].seconds_old > 600); // 10 min
+
+    if (needsRefresh) {
+      console.log("Sincronizando plantillas desde Meta...");
+
+      // pedir plantillas actuales a Meta
+      const resp = await axios.get(
+        `${GRAPH}/${API_VER}/${WABA_PHONE_NUMBER_ID}/message_templates`,
+        {
+          headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+        }
+      );
+
+      const templates = resp.data?.data || [];
+
+      // vaciar cache anterior y guardar nuevas
+      await p.query(`DELETE FROM templates_cache;`);
+      for (const t of templates) {
+        await p.query(
+          `INSERT INTO templates_cache (name, language, status, category, last_synced_at)
+           VALUES ($1,$2,$3,$4,NOW())`,
+          [t.name, t.language || null, t.status || null, t.category || null]
+        );
+      }
+
+      console.log(`Plantillas actualizadas (${templates.length} total).`);
+
+      return res.json(templates);
+    } else {
+      // devolver cache actual
+      const formatted = cacheRows.map((r) => ({
+        name: r.name,
+        language: r.language,
+        status: r.status,
+        category: r.category,
+      }));
+      return res.json(formatted);
+    }
+  } catch (err) {
+    console.error("Error al sincronizar plantillas:", err.message);
+    return res.status(500).json({ error: "Error al sincronizar plantillas" });
+  }
 });
 
 // ---------- API: MEDIA PROXY ----------
