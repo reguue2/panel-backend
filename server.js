@@ -294,8 +294,8 @@ server.listen(PORT, () => {
   console.log(`Servidor en puerto ${PORT}`);
 });
 
-// RUTA TEMPORAL PARA ALTER TABLE (usar solo una vez)
-app.post("/api/admin/add-is-read-column", async (req, res) => {
+// RUTA TEMPORAL: Ver todas las tablas y columnas de la base de datos
+app.get("/api/admin/db-structure", async (req, res) => {
   const API_KEY = process.env.PANEL_TOKEN || "";
   const providedKey = req.headers["x-api-key"];
 
@@ -305,13 +305,35 @@ app.post("/api/admin/add-is-read-column", async (req, res) => {
 
   try {
     const client = await pool.connect();
-    await client.query(
-      "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;"
-    );
+    const result = await client.query(`
+      SELECT 
+        table_name, 
+        column_name, 
+        data_type, 
+        is_nullable, 
+        column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+      ORDER BY table_name, ordinal_position;
+    `);
     client.release();
-    res.json({ success: true, message: "Columna is_read añadida correctamente" });
+
+    // Agrupar por tabla
+    const tables = {};
+    result.rows.forEach(row => {
+      if (!tables[row.table_name]) tables[row.table_name] = [];
+      tables[row.table_name].push({
+        column: row.column_name,
+        type: row.data_type,
+        nullable: row.is_nullable,
+        default: row.column_default
+      });
+    });
+
+    res.json(tables);
   } catch (err) {
-    console.error("Error al añadir columna is_read:", err);
+    console.error("Error al obtener estructura de BD:", err);
     res.status(500).json({ error: err.message });
   }
 });
+
