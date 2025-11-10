@@ -220,12 +220,15 @@ app.post("/webhook", async (req, res) => {
     for (const entry of entries) {
       const changes = entry?.changes || [];
       for (const ch of changes) {
-        const msgs = ch?.value?.messages || [];
+        const val = ch?.value || {};
+        const msgs = val.messages || [];
         for (const m of msgs) {
-          const from = m.from; // telefono cliente
-          const tsSec = Number(m.timestamp || Math.floor(Date.now()/1000));
+          const from = m.from;
+          const tsSec = Number(m.timestamp || Math.floor(Date.now() / 1000));
+          const type = m.type;
 
-          if (m.type === "text" && m.text?.body) {
+          // --- TEXTO ---
+          if (type === "text" && m.text?.body) {
             await insertMessage({
               phone: from,
               direction: "in",
@@ -236,7 +239,9 @@ app.post("/webhook", async (req, res) => {
               media_url: null,
               is_read: false,
             });
-          } else if (m.type === "image" && m.image?.id) {
+          }
+          // --- IMAGEN ---
+          else if (type === "image" && m.image?.id) {
             await insertMessage({
               phone: from,
               direction: "in",
@@ -247,7 +252,9 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.image.id}`,
               is_read: false,
             });
-          } else if (m.type === "document" && m.document?.id) {
+          }
+          // --- DOCUMENTO ---
+          else if (type === "document" && m.document?.id) {
             await insertMessage({
               phone: from,
               direction: "in",
@@ -258,7 +265,9 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.document.id}`,
               is_read: false,
             });
-          } else if (m.type === "video" && m.video?.id) {
+          }
+          // --- VIDEO ---
+          else if (type === "video" && m.video?.id) {
             await insertMessage({
               phone: from,
               direction: "in",
@@ -269,7 +278,14 @@ app.post("/webhook", async (req, res) => {
               media_url: `/api/media/${m.video.id}`,
               is_read: false,
             });
-          } else if (m.type === "interactive") {
+          }
+          // --- BOTONES / LISTAS (RESPUESTAS INTERACTIVAS) ---
+          else if (
+            type === "interactive" ||
+            m.interactive ||
+            m.button ||
+            m.list_reply
+          ) {
             const it = m.interactive || {};
             let text = null;
 
@@ -277,6 +293,12 @@ app.post("/webhook", async (req, res) => {
               text = it.button_reply.title || it.button_reply.id;
             } else if (it.type === "list_reply" && it.list_reply) {
               text = it.list_reply.title || it.list_reply.id;
+            } else if (m.button?.text) {
+              // casos antiguos de botón
+              text = m.button.text;
+            } else if (m.list_reply?.title) {
+              // casos antiguos de lista
+              text = m.list_reply.title;
             } else {
               text = "Respuesta interactiva";
             }
@@ -292,6 +314,7 @@ app.post("/webhook", async (req, res) => {
               is_read: false,
             });
           }
+
           io.emit("message:new", { phone: from });
         }
       }
@@ -299,9 +322,10 @@ app.post("/webhook", async (req, res) => {
     res.sendStatus(200);
   } catch (e) {
     console.error("webhook error:", e?.response?.data || e.message);
-    res.sendStatus(200); // evitar reintentos agresivos
+    res.sendStatus(200);
   }
 });
+
 
 // ---------- HEALTH ----------
 app.get("/health", (_req, res) => res.json({ ok: true }));
