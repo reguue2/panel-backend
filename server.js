@@ -60,7 +60,7 @@ app.get("/api/chats", async (req, res) => {
       SELECT c.*, 
         EXISTS (
           SELECT 1 FROM messages m 
-          WHERE m.chat_phone = c.phone AND m.is_read = FALSE AND m.sender != 'me'
+          WHERE m.phone = c.phone AND m.is_read = FALSE AND m.sender != 'me'
         ) AS has_unread
       FROM chats c
       ORDER BY c.last_timestamp DESC
