@@ -278,7 +278,7 @@ app.patch("/api/chats/:phone/read", async (req, res) => {
   try {
     const client = await pool.connect();
     await client.query(
-      "UPDATE messages SET is_read = TRUE WHERE chat_phone = $1 AND sender != 'me'",
+      "UPDATE messages SET is_read = TRUE WHERE phone = $1 AND direction = 'in' AND is_read = FALSE",
       [phone]
     );
     client.release();
@@ -288,7 +288,6 @@ app.patch("/api/chats/:phone/read", async (req, res) => {
     res.status(500).json({ error: "Error interno" });
   }
 });
-
 
 // ---------- Socket.IO ----------
 io.on("connection", () => {});
