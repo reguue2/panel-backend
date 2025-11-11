@@ -166,6 +166,15 @@ app.post("/api/messages/send", async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- API: CHATS PIN ----------
+app.patch("/api/chats/:phone/pin", async (req, res) => {
+  const p = initDB();
+  const { phone } = req.params;
+  const { pinned } = req.body; // true o false
+  await p.query(`UPDATE chats SET pinned = $1 WHERE phone = $2`, [pinned, phone]);
+  res.json({ ok: true });
+});
+
 // ---------- API: TEMPLATES (cache sencillo) ----------
 app.get("/api/templates", async (req, res) => {
   const p = initDB();
